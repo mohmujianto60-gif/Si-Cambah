@@ -20,7 +20,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
-import { useAuth } from '../lib/authContext';
+import { useAuth } from '../lib/useAuth';
 
 interface NavLink {
   type: 'link';

@@ -1,24 +1,9 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { User } from '../types/hibah';
+import { AuthContext } from './useAuth';
 
 const USERS_KEY = 'sicambah_users';
 const SESSION_KEY = 'sicambah_session';
-
-interface AuthContextType {
-  user: User | null;
-  login: (username: string, password: string) => boolean;
-  logout: () => void;
-  isAdmin: boolean;
-  isOperator: boolean;
-}
-
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  login: () => false,
-  logout: () => {},
-  isAdmin: false,
-  isOperator: false,
-});
 
 function getUsers(): User[] {
   const data = localStorage.getItem(USERS_KEY);
@@ -47,19 +32,19 @@ function getUsers(): User[] {
   return JSON.parse(data);
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+function readStoredSession(): User | null {
+  const stored = localStorage.getItem(SESSION_KEY);
+  if (!stored) return null;
+  try {
+    return JSON.parse(stored) as User;
+  } catch {
+    localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+}
 
-  useEffect(() => {
-    const stored = localStorage.getItem(SESSION_KEY);
-    if (stored) {
-      try {
-        setUser(JSON.parse(stored));
-      } catch {
-        localStorage.removeItem(SESSION_KEY);
-      }
-    }
-  }, []);
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(() => readStoredSession());
 
   const login = (username: string, password: string): boolean => {
     const users = getUsers();
@@ -90,8 +75,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  return useContext(AuthContext);
 }

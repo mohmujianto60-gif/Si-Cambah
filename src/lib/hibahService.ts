@@ -2,6 +2,13 @@ import type { Hibah, KategoriHibah, Legalitas, DuplicateWarning, BansosMasyaraka
 
 const HIBAH_KEY = 'sicambah_hibah';
 const LEGALITAS_KEY = 'sicambah_legalitas';
+export const DATA_CHANGE_EVENT = 'sicambah:data-change';
+
+function notifyChange() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(DATA_CHANGE_EVENT));
+  }
+}
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -14,6 +21,7 @@ function getAllHibah(): Hibah[] {
 
 function saveAllHibah(data: Hibah[]): void {
   localStorage.setItem(HIBAH_KEY, JSON.stringify(data));
+  notifyChange();
 }
 
 export function getHibahList(kategori?: KategoriHibah, tahun?: number, search?: string): Hibah[] {
@@ -126,6 +134,10 @@ export function confirmHibah(id: string): Hibah {
   return updateHibah(id, { status: 'confirmed' });
 }
 
+export function revertHibah(id: string): Hibah {
+  return updateHibah(id, { status: 'draft' });
+}
+
 export function importHibah(items: Omit<Hibah, 'id' | 'created_at' | 'updated_at'>[]): { imported: number; duplicates: number } {
   let imported = 0;
   let duplicates = 0;
@@ -175,6 +187,7 @@ function getAllLegalitas(): Legalitas[] {
 
 function saveAllLegalitas(data: Legalitas[]): void {
   localStorage.setItem(LEGALITAS_KEY, JSON.stringify(data));
+  notifyChange();
 }
 
 export function getLegalitasList(search?: string): Legalitas[] {
