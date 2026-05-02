@@ -89,7 +89,7 @@ export default function GenericHibahPage({
         ...form,
         kategori,
         status: 'draft',
-        created_by: user?.username || '',
+        created_by: user?.email || "",
       } as Omit<Hibah, 'id' | 'created_at' | 'updated_at'>);
       toast.success('Data berhasil ditambahkan');
     }
@@ -123,7 +123,7 @@ export default function GenericHibahPage({
         ...importForm,
         kategori,
         status: 'draft',
-        created_by: user?.username || '',
+        created_by: user?.email || "",
       } as Omit<Hibah, 'id' | 'created_at' | 'updated_at'>);
       count++;
     }

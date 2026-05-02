@@ -64,7 +64,7 @@ export default function BansosMasyarakatPage() {
         ...form,
         kategori: 'bansos_masyarakat',
         status: 'draft',
-        created_by: user?.username || '',
+        created_by: user?.email || "",
       } as Omit<Hibah, 'id' | 'created_at' | 'updated_at'>);
       toast.success('Data berhasil ditambahkan');
     }
@@ -99,7 +99,7 @@ export default function BansosMasyarakatPage() {
         opd_pelaksana: row['OPD Pelaksana'] || row['opd_pelaksana'] || '',
         tahun: Number(row['Tahun'] || row['tahun']) || new Date().getFullYear(),
         status: 'draft',
-        created_by: user?.username || '',
+        created_by: user?.email || "",
       } as Omit<Hibah, 'id' | 'created_at' | 'updated_at'>);
       count++;
     }
