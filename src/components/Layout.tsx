@@ -20,6 +20,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   DatabaseBackup,
+  UserCog,
 } from 'lucide-react';
 import { useAuth } from '../lib/useAuth';
 import MigrationModal from './MigrationModal';
@@ -30,6 +31,7 @@ interface NavLink {
   to: string;
   label: string;
   icon: typeof LayoutDashboard;
+  adminOnly?: boolean;
 }
 
 interface NavSubGroup {
@@ -80,6 +82,13 @@ const navItems: NavItem[] = [
     ],
   },
   { type: 'link', to: '/legalitas', label: 'Legalitas', icon: FileCheck },
+  {
+    type: 'link',
+    to: '/manajemen-user',
+    label: 'Manajemen User',
+    icon: UserCog,
+    adminOnly: true,
+  },
 ];
 
 function getAllLinks(items: (NavLink | NavSubGroup)[]): NavLink[] {
@@ -195,7 +204,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Navigation */}
         <nav className={`flex-1 ${collapsed ? 'p-2' : 'p-3'} space-y-1 overflow-y-auto`}>
-          {navItems.map((item) => {
+          {navItems
+            .filter((item) => !(item.type === 'link' && item.adminOnly && !isAdmin))
+            .map((item) => {
             if (item.type === 'group') {
               const Icon = item.icon;
               const allLinks = getAllLinks(item.children);

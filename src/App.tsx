@@ -15,6 +15,7 @@ import LembagaKhususPage from './pages/LembagaKhusus';
 import LembagaRegulerPage from './pages/LembagaReguler';
 import HibahKelompokPage from './pages/HibahKelompok';
 import LegalitasPage from './pages/Legalitas';
+import ManajemenUser from './pages/ManajemenUser';
 
 function FullScreenLoader() {
   return (
@@ -64,6 +65,7 @@ function AppRoutes() {
         <Route path="/lembaga-reguler" element={<LembagaRegulerPage />} />
         <Route path="/hibah-kelompok" element={<HibahKelompokPage />} />
         <Route path="/legalitas" element={<LegalitasPage />} />
+        <Route path="/manajemen-user" element={<ManajemenUser />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
