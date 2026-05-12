@@ -21,6 +21,7 @@ import {
   PanelLeftOpen,
   DatabaseBackup,
   UserCog,
+  History,
 } from 'lucide-react';
 import { useAuth } from '../lib/useAuth';
 import MigrationModal from './MigrationModal';
@@ -87,6 +88,13 @@ const navItems: NavItem[] = [
     to: '/manajemen-user',
     label: 'Manajemen User',
     icon: UserCog,
+    adminOnly: true,
+  },
+  {
+    type: 'link',
+    to: '/audit-log',
+    label: 'Audit Log',
+    icon: History,
     adminOnly: true,
   },
 ];
