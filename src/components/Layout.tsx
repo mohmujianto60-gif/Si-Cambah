@@ -95,7 +95,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [openSubGroups, setOpenSubGroups] = useState<Record<string, boolean>>({ 'Bantuan Keuangan': true, 'Hibah Lembaga': true });
   const toggleSubGroup = (label: string) => setOpenSubGroups((prev) => ({ ...prev, [label]: !prev[label] }));
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, signOut } = useAuth();
+  const handleSignOut = () => {
+    void signOut();
+  };
 
   const sidebarWidth = collapsed ? 'w-[68px]' : 'w-72';
   const mainMargin = collapsed ? 'lg:ml-[68px]' : 'lg:ml-72';
@@ -311,7 +314,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   </div>
                 )}
                 <button
-                  onClick={logout}
+                  onClick={handleSignOut}
                   className="p-2 rounded-lg hover:bg-teal-800 text-slate-400 hover:text-red-400 transition-colors"
                   title="Keluar"
                 >

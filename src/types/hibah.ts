@@ -134,12 +134,14 @@ export interface Legalitas {
   updated_at: string;
 }
 
+export type UserRole = 'admin' | 'operator';
+
 export interface User {
   id: string;
-  username: string;
-  password: string;
+  email: string;
   nama: string;
-  role: 'admin' | 'operator';
+  role: UserRole;
+  avatar_url?: string | null;
   created_at: string;
 }
 
