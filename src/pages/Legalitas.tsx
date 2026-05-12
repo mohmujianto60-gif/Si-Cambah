@@ -1,8 +1,14 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { Search, Plus, Eye, Edit3, Trash2, Save, X, AlertTriangle, FileCheck, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Modal from '../components/Modal';
-import { getLegalitasList, createLegalitas, updateLegalitas, deleteLegalitas } from '../lib/hibahService';
+import {
+  getLegalitasList,
+  createLegalitas,
+  updateLegalitas,
+  deleteLegalitas,
+} from '../lib/hibahService';
+import { useAsyncData } from '../lib/useAsyncData';
 import { useAuth } from '../lib/useAuth';
 import type { Legalitas as LegalitasType } from '../types/hibah';
 
@@ -18,15 +24,15 @@ function getGDriveEmbedUrl(url: string): string | null {
 
 export default function LegalitasPage() {
   const { isAdmin } = useAuth();
-  const [data, setData] = useState<LegalitasType[]>(() => getLegalitasList());
+  const fetcher = useCallback(() => getLegalitasList(), []);
+  const { data, loading, refresh } = useAsyncData<LegalitasType[]>(fetcher, []);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState<LegalitasType | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [previewItem, setPreviewItem] = useState<LegalitasType | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-
-  const refresh = useCallback(() => setData(getLegalitasList()), []);
+  const [submitting, setSubmitting] = useState(false);
 
   const filtered = data.filter((l) => {
     if (!search) return true;
@@ -38,19 +44,27 @@ export default function LegalitasPage() {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editItem) {
-      updateLegalitas(editItem.id, form);
-      toast.success('Data berhasil diperbarui');
-    } else {
-      createLegalitas(form);
-      toast.success('Data berhasil ditambahkan');
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      if (editItem) {
+        await updateLegalitas(editItem.id, form);
+        toast.success('Data berhasil diperbarui');
+      } else {
+        await createLegalitas(form);
+        toast.success('Data berhasil ditambahkan');
+      }
+      setShowForm(false);
+      setEditItem(null);
+      setForm(emptyForm);
+      refresh();
+    } catch (err) {
+      toast.error('Gagal menyimpan: ' + (err as Error).message);
+    } finally {
+      setSubmitting(false);
     }
-    setShowForm(false);
-    setEditItem(null);
-    setForm(emptyForm);
-    refresh();
   };
 
   const handleEdit = (item: LegalitasType) => {
@@ -62,11 +76,15 @@ export default function LegalitasPage() {
     setShowForm(true);
   };
 
-  const handleDelete = (id: string) => {
-    deleteLegalitas(id);
-    setDeleteConfirm(null);
-    refresh();
-    toast.success('Data berhasil dihapus');
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteLegalitas(id);
+      setDeleteConfirm(null);
+      refresh();
+      toast.success('Data berhasil dihapus');
+    } catch (err) {
+      toast.error('Gagal menghapus: ' + (err as Error).message);
+    }
   };
 
   return (
@@ -96,7 +114,20 @@ export default function LegalitasPage() {
         />
       </div>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="aspect-[4/3] bg-gray-100 animate-pulse" />
+              <div className="p-4 space-y-2">
+                <div className="h-4 bg-gray-100 rounded animate-pulse" />
+                <div className="h-3 bg-gray-100 rounded w-2/3 animate-pulse" />
+                <div className="h-3 bg-gray-100 rounded w-1/2 animate-pulse" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-400">
           <FileCheck className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>Belum ada data legalitas</p>
@@ -184,8 +215,17 @@ export default function LegalitasPage() {
             <textarea name="keterangan" value={form.keterangan} onChange={handleChange} rows={2}
               className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm resize-none" placeholder="Catatan tambahan" />
           </div>
-          <button type="submit" className="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-sm font-medium flex items-center gap-2">
-            <Save className="w-4 h-4" />{editItem ? 'Simpan Perubahan' : 'Simpan'}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium flex items-center gap-2"
+          >
+            {submitting ? (
+              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
+            {editItem ? 'Simpan Perubahan' : 'Simpan'}
           </button>
         </form>
       </Modal>

@@ -1,23 +1,38 @@
-import { useEffect, useState } from 'react';
-import { BarChart3, Users, TrendingUp, FileText, Sparkles } from 'lucide-react';
-import { getStats, getAvailableYears, DATA_CHANGE_EVENT } from '../lib/hibahService';
+import { useCallback } from 'react';
+import { BarChart3, Users, TrendingUp, FileText, Sparkles, AlertCircle } from 'lucide-react';
+import {
+  getStats,
+  getAvailableYears,
+  type HibahStats,
+} from '../lib/hibahService';
+import { useAsyncData } from '../lib/useAsyncData';
 import { KATEGORI_LABELS, KATEGORI_COLORS, type KategoriHibah } from '../types/hibah';
 import StatCard from '../components/StatCard';
 import { useAuth } from '../lib/useAuth';
 
+interface DashboardData {
+  stats: HibahStats;
+  years: number[];
+}
+
+const EMPTY: DashboardData = {
+  stats: { byKategori: {}, byTahun: {}, byKategoriTahun: {}, total: 0 },
+  years: [],
+};
+
 export default function Dashboard() {
   const { user } = useAuth();
-  const [stats, setStats] = useState(() => getStats());
-  const [years, setYears] = useState(() => getAvailableYears());
 
-  useEffect(() => {
-    const onChange = () => {
-      setStats(getStats());
-      setYears(getAvailableYears());
-    };
-    window.addEventListener(DATA_CHANGE_EVENT, onChange);
-    return () => window.removeEventListener(DATA_CHANGE_EVENT, onChange);
+  const fetcher = useCallback(async (): Promise<DashboardData> => {
+    const [stats, years] = await Promise.all([getStats(), getAvailableYears()]);
+    return { stats, years };
   }, []);
+
+  const { data, loading, error } = useAsyncData<DashboardData>(fetcher, EMPTY, {
+    errorPrefix: 'Gagal memuat statistik',
+  });
+
+  const { stats, years } = data;
 
   const kategoriEntries = Object.entries(stats.byKategori) as [KategoriHibah, number][];
   const maxCount = Math.max(...Object.values(stats.byKategori), 1);
@@ -41,7 +56,7 @@ export default function Dashboard() {
             {greeting}{user?.nama ? `, ${user.nama}` : ''} — ringkasan data penerima hibah.
           </p>
         </div>
-        {stats.total > 0 && (
+        {!loading && stats.total > 0 && (
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-50 border border-cyan-200/70 text-cyan-700 text-xs font-medium shadow-sm">
             <Sparkles className="w-3.5 h-3.5" />
             {stats.total} total data tercatat
@@ -49,33 +64,64 @@ export default function Dashboard() {
         )}
       </div>
 
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+          <div className="text-sm text-red-800">
+            <p className="font-semibold">Gagal memuat statistik</p>
+            <p className="mt-1 text-red-700">{error}</p>
+            <p className="mt-2 text-xs text-red-600">
+              Pastikan tabel <code>hibah</code> sudah dibuat di Supabase dengan menjalankan SQL{' '}
+              <code>supabase/migrations/001_hibah_schema.sql</code>.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Total Data" value={stats.total} icon={FileText} color="blue" />
-        <StatCard
-          title="Kategori Aktif"
-          value={Object.keys(stats.byKategori).length}
-          icon={BarChart3}
-          color="green"
-        />
-        <StatCard
-          title="Tahun Tercatat"
-          value={years.length}
-          icon={TrendingUp}
-          color="yellow"
-        />
-        <StatCard
-          title="Penerima Bansos"
-          value={stats.byKategori['bansos_masyarakat'] || 0}
-          icon={Users}
-          color="red"
-        />
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-24 bg-white/80 backdrop-blur-sm rounded-2xl border border-white/50 shadow-sm animate-pulse"
+            />
+          ))
+        ) : (
+          <>
+            <StatCard title="Total Data" value={stats.total} icon={FileText} color="blue" />
+            <StatCard
+              title="Kategori Aktif"
+              value={Object.keys(stats.byKategori).length}
+              icon={BarChart3}
+              color="green"
+            />
+            <StatCard
+              title="Tahun Tercatat"
+              value={years.length}
+              icon={TrendingUp}
+              color="yellow"
+            />
+            <StatCard
+              title="Penerima Bansos"
+              value={stats.byKategori['bansos_masyarakat'] || 0}
+              icon={Users}
+              color="red"
+            />
+          </>
+        )}
       </div>
 
       {/* By Category Chart */}
       <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/50 shadow-sm p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-6">Rekap per Kategori</h2>
-        {kategoriEntries.length === 0 ? (
+        {loading ? (
+          <div className="space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-8 bg-gray-100 rounded-full animate-pulse" />
+            ))}
+          </div>
+        ) : kategoriEntries.length === 0 ? (
           <div className="text-center py-8 text-gray-400">
             <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>Belum ada data — mulai input data untuk melihat statistik</p>
@@ -105,7 +151,7 @@ export default function Dashboard() {
       </div>
 
       {/* By Year */}
-      {years.length > 0 && (
+      {!loading && years.length > 0 && (
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/50 shadow-sm p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-6">Rekap per Tahun</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

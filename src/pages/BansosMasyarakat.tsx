@@ -1,10 +1,16 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import toast from 'react-hot-toast';
 import DataTable from '../components/DataTable';
 import Modal from '../components/Modal';
 import ImportModal from '../components/ImportModal';
-import { getHibahList, createHibah, updateHibah, checkDuplicates } from '../lib/hibahService';
-import { useAuth } from '../lib/useAuth';
+import {
+  getHibahList,
+  createHibah,
+  updateHibah,
+  checkDuplicates,
+  type CreateHibahInput,
+} from '../lib/hibahService';
+import { useAsyncData } from '../lib/useAsyncData';
 import type { Hibah, BansosMasyarakat as BansosType } from '../types/hibah';
 import { AlertTriangle, Save } from 'lucide-react';
 
@@ -24,55 +30,65 @@ const emptyForm = {
 };
 
 export default function BansosMasyarakatPage() {
-  const { user } = useAuth();
-  const [data, setData] = useState<Hibah[]>(() => getHibahList('bansos_masyarakat'));
+  const fetcher = useCallback(() => getHibahList('bansos_masyarakat'), []);
+  const { data, loading, refresh } = useAsyncData<Hibah[]>(fetcher, []);
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editItem, setEditItem] = useState<BansosType | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [dupWarnings, setDupWarnings] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
-  const refresh = useCallback(() => setData(getHibahList('bansos_masyarakat')), []);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     const sanitized = name === 'nik' ? value.replace(/\D/g, '').slice(0, 16) : value;
     const newForm = { ...form, [name]: name === 'tahun' ? Number(value) : sanitized };
     setForm(newForm);
 
     if (name === 'nik' && sanitized.length >= 6) {
-      const warnings = checkDuplicates({
-        kategori: 'bansos_masyarakat', nik: sanitized, id: editItem?.id,
-      } as Partial<Hibah>);
-      setDupWarnings(warnings.map((w) => w.message));
+      try {
+        const warnings = await checkDuplicates({
+          kategori: 'bansos_masyarakat', nik: sanitized, id: editItem?.id,
+        } as Partial<Hibah>);
+        setDupWarnings(warnings.map((w) => w.message));
+      } catch {
+        // ignore
+      }
     } else if (name === 'nik') {
       setDupWarnings([]);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     if (form.nik.length !== 16) {
       toast.error('NIK harus terdiri dari 16 digit');
       return;
     }
-    if (editItem) {
-      updateHibah(editItem.id, { ...form } as Partial<Hibah>);
-      toast.success('Data berhasil diperbarui');
-    } else {
-      createHibah({
-        ...form,
-        kategori: 'bansos_masyarakat',
-        status: 'draft',
-        created_by: user?.email || "",
-      } as Omit<Hibah, 'id' | 'created_at' | 'updated_at'>);
-      toast.success('Data berhasil ditambahkan');
+    setSubmitting(true);
+    try {
+      if (editItem) {
+        await updateHibah(editItem.id, { ...form } as Partial<Hibah>);
+        toast.success('Data berhasil diperbarui');
+      } else {
+        await createHibah({
+          ...form,
+          kategori: 'bansos_masyarakat',
+          status: 'draft',
+        } as CreateHibahInput);
+        toast.success('Data berhasil ditambahkan');
+      }
+      setShowForm(false);
+      setEditItem(null);
+      setForm(emptyForm);
+      setDupWarnings([]);
+      refresh();
+    } catch (err) {
+      toast.error('Gagal menyimpan: ' + (err as Error).message);
+    } finally {
+      setSubmitting(false);
     }
-    setShowForm(false);
-    setEditItem(null);
-    setForm(emptyForm);
-    setDupWarnings([]);
-    refresh();
   };
 
   const handleEdit = (item: Hibah) => {
@@ -85,25 +101,34 @@ export default function BansosMasyarakatPage() {
     setShowForm(true);
   };
 
-  const handleImport = (rows: Record<string, string>[]) => {
+  const handleImport = async (rows: Record<string, string>[]) => {
+    const toastId = toast.loading(`Mengimport ${rows.length} data...`);
     let count = 0;
+    let failed = 0;
     for (const row of rows) {
-      createHibah({
-        kategori: 'bansos_masyarakat',
-        nik: row['NIK'] || row['nik'] || '',
-        nama: row['Nama'] || row['nama'] || '',
-        alamat: row['Alamat'] || row['alamat'] || '',
-        bentuk_bansos: row['Bentuk Bansos'] || row['bentuk_bansos'] || '',
-        keterangan: row['Keterangan'] || row['keterangan'] || '',
-        nomor_sk: row['Nomor SK'] || row['nomor_sk'] || '',
-        opd_pelaksana: row['OPD Pelaksana'] || row['opd_pelaksana'] || '',
-        tahun: Number(row['Tahun'] || row['tahun']) || new Date().getFullYear(),
-        status: 'draft',
-        created_by: user?.email || "",
-      } as Omit<Hibah, 'id' | 'created_at' | 'updated_at'>);
-      count++;
+      try {
+        await createHibah({
+          kategori: 'bansos_masyarakat',
+          nik: row['NIK'] || row['nik'] || '',
+          nama: row['Nama'] || row['nama'] || '',
+          alamat: row['Alamat'] || row['alamat'] || '',
+          bentuk_bansos: row['Bentuk Bansos'] || row['bentuk_bansos'] || '',
+          keterangan: row['Keterangan'] || row['keterangan'] || '',
+          nomor_sk: row['Nomor SK'] || row['nomor_sk'] || '',
+          opd_pelaksana: row['OPD Pelaksana'] || row['opd_pelaksana'] || '',
+          tahun: Number(row['Tahun'] || row['tahun']) || new Date().getFullYear(),
+          status: 'draft',
+        } as CreateHibahInput);
+        count++;
+      } catch {
+        failed++;
+      }
     }
-    toast.success(`${count} data berhasil diimport`);
+    if (failed > 0) {
+      toast.error(`${count} berhasil, ${failed} gagal`, { id: toastId });
+    } else {
+      toast.success(`${count} data berhasil diimport`, { id: toastId });
+    }
     refresh();
   };
 
@@ -113,6 +138,7 @@ export default function BansosMasyarakatPage() {
         title="Bansos Masyarakat"
         subtitle="Data penerima bantuan sosial masyarakat"
         data={data}
+        loading={loading}
         columns={columns}
         onAdd={() => { setEditItem(null); setForm(emptyForm); setDupWarnings([]); setShowForm(true); }}
         onImport={() => setShowImport(true)}
@@ -135,70 +161,109 @@ export default function BansosMasyarakatPage() {
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                NIK <span className="text-gray-400 font-normal">(16 digit)</span>
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">NIK</label>
               <input
                 name="nik"
                 required
                 value={form.nik}
                 onChange={handleChange}
+                placeholder="16 digit NIK"
                 inputMode="numeric"
-                pattern="\d{16}"
-                maxLength={16}
-                title="NIK harus 16 digit angka"
-                className={`w-full px-3 py-2 rounded-xl border focus:ring-2 outline-none text-sm transition-all ${
-                  form.nik && form.nik.length !== 16
-                    ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
-                    : 'border-gray-300 focus:border-primary-500 focus:ring-primary-200'
-                }`}
-                placeholder="Nomor Induk Kependudukan"
+                pattern="[0-9]{16}"
+                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm"
               />
-              {form.nik && form.nik.length !== 16 && (
-                <p className="text-xs text-red-600 mt-1">NIK saat ini {form.nik.length} digit, harus 16 digit.</p>
+              {form.nik.length > 0 && form.nik.length < 16 && (
+                <p className="text-xs text-amber-600 mt-1">NIK harus 16 digit ({form.nik.length}/16)</p>
               )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Nama</label>
-              <input name="nama" required value={form.nama} onChange={handleChange}
-                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm" placeholder="Nama penerima" />
+              <input
+                name="nama"
+                required
+                value={form.nama}
+                onChange={handleChange}
+                placeholder="Nama lengkap"
+                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm"
+              />
             </div>
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Alamat</label>
-              <input name="alamat" required value={form.alamat} onChange={handleChange}
-                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm" placeholder="Alamat lengkap" />
+              <input
+                name="alamat"
+                required
+                value={form.alamat}
+                onChange={handleChange}
+                placeholder="Alamat lengkap"
+                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Bentuk Bansos</label>
-              <input name="bentuk_bansos" required value={form.bentuk_bansos} onChange={handleChange}
-                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm" placeholder="Jenis bantuan" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Nomor SK</label>
-              <input name="nomor_sk" value={form.nomor_sk} onChange={handleChange}
-                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm" placeholder="Nomor surat keputusan" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">OPD Pelaksana</label>
-              <input name="opd_pelaksana" value={form.opd_pelaksana} onChange={handleChange}
-                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm" placeholder="Nama OPD" />
+              <input
+                name="bentuk_bansos"
+                required
+                value={form.bentuk_bansos}
+                onChange={handleChange}
+                placeholder="Misal: Uang Rp. 500.000"
+                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Tahun</label>
-              <input name="tahun" type="number" required value={form.tahun} onChange={handleChange}
-                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm" />
+              <input
+                name="tahun"
+                type="number"
+                required
+                value={form.tahun}
+                onChange={handleChange}
+                min={1900}
+                max={2200}
+                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Nomor SK</label>
+              <input
+                name="nomor_sk"
+                value={form.nomor_sk}
+                onChange={handleChange}
+                placeholder="Nomor Surat Keputusan"
+                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">OPD Pelaksana</label>
+              <input
+                name="opd_pelaksana"
+                value={form.opd_pelaksana}
+                onChange={handleChange}
+                placeholder="Nama OPD"
+                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm"
+              />
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Keterangan</label>
-            <textarea name="keterangan" value={form.keterangan} onChange={handleChange} rows={2}
-              className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm resize-none" placeholder="Catatan tambahan" />
+            <textarea
+              name="keterangan"
+              value={form.keterangan}
+              onChange={handleChange}
+              rows={2}
+              placeholder="Catatan tambahan"
+              className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm resize-none"
+            />
           </div>
           <button
             type="submit"
-            className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 active:scale-95 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-all shadow-sm shadow-cyan-500/30"
+            disabled={submitting}
+            className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-all shadow-sm shadow-cyan-500/30"
           >
-            <Save className="w-4 h-4" />
+            {submitting ? (
+              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
             {editItem ? 'Simpan Perubahan' : 'Simpan'}
           </button>
         </form>
@@ -208,7 +273,7 @@ export default function BansosMasyarakatPage() {
         isOpen={showImport}
         onClose={() => setShowImport(false)}
         onImport={handleImport}
-        expectedColumns={['NIK', 'Nama', 'Alamat', 'Bentuk Bansos', 'Keterangan', 'Nomor SK', 'OPD Pelaksana', 'Tahun']}
+        expectedColumns={['NIK', 'Nama', 'Alamat', 'Bentuk Bansos', 'Nomor SK', 'OPD Pelaksana', 'Tahun', 'Keterangan']}
       />
     </>
   );
