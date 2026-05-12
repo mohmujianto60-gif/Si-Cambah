@@ -4,7 +4,7 @@ import DataTable from '../components/DataTable';
 import Modal from '../components/Modal';
 import ImportModal from '../components/ImportModal';
 import { getHibahList, createHibah, updateHibah, checkDuplicates } from '../lib/hibahService';
-import { useAuth } from '../lib/authContext';
+import { useAuth } from '../lib/useAuth';
 import type { Hibah, BansosMasyarakat as BansosType } from '../types/hibah';
 import { AlertTriangle, Save } from 'lucide-react';
 
@@ -36,12 +36,13 @@ export default function BansosMasyarakatPage() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    const newForm = { ...form, [name]: name === 'tahun' ? Number(value) : value };
+    const sanitized = name === 'nik' ? value.replace(/\D/g, '').slice(0, 16) : value;
+    const newForm = { ...form, [name]: name === 'tahun' ? Number(value) : sanitized };
     setForm(newForm);
 
-    if (name === 'nik' && value.length >= 6) {
+    if (name === 'nik' && sanitized.length >= 6) {
       const warnings = checkDuplicates({
-        kategori: 'bansos_masyarakat', nik: value, id: editItem?.id,
+        kategori: 'bansos_masyarakat', nik: sanitized, id: editItem?.id,
       } as Partial<Hibah>);
       setDupWarnings(warnings.map((w) => w.message));
     } else if (name === 'nik') {
@@ -51,6 +52,10 @@ export default function BansosMasyarakatPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (form.nik.length !== 16) {
+      toast.error('NIK harus terdiri dari 16 digit');
+      return;
+    }
     if (editItem) {
       updateHibah(editItem.id, { ...form } as Partial<Hibah>);
       toast.success('Data berhasil diperbarui');
@@ -130,9 +135,28 @@ export default function BansosMasyarakatPage() {
           )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">NIK</label>
-              <input name="nik" required value={form.nik} onChange={handleChange}
-                className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm" placeholder="Nomor Induk Kependudukan" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                NIK <span className="text-gray-400 font-normal">(16 digit)</span>
+              </label>
+              <input
+                name="nik"
+                required
+                value={form.nik}
+                onChange={handleChange}
+                inputMode="numeric"
+                pattern="\d{16}"
+                maxLength={16}
+                title="NIK harus 16 digit angka"
+                className={`w-full px-3 py-2 rounded-xl border focus:ring-2 outline-none text-sm transition-all ${
+                  form.nik && form.nik.length !== 16
+                    ? 'border-red-300 focus:border-red-500 focus:ring-red-200'
+                    : 'border-gray-300 focus:border-primary-500 focus:ring-primary-200'
+                }`}
+                placeholder="Nomor Induk Kependudukan"
+              />
+              {form.nik && form.nik.length !== 16 && (
+                <p className="text-xs text-red-600 mt-1">NIK saat ini {form.nik.length} digit, harus 16 digit.</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Nama</label>
@@ -170,8 +194,12 @@ export default function BansosMasyarakatPage() {
             <textarea name="keterangan" value={form.keterangan} onChange={handleChange} rows={2}
               className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm resize-none" placeholder="Catatan tambahan" />
           </div>
-          <button type="submit" className="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-sm font-medium flex items-center gap-2">
-            <Save className="w-4 h-4" />{editItem ? 'Simpan Perubahan' : 'Simpan'}
+          <button
+            type="submit"
+            className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 active:scale-95 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-all shadow-sm shadow-cyan-500/30"
+          >
+            <Save className="w-4 h-4" />
+            {editItem ? 'Simpan Perubahan' : 'Simpan'}
           </button>
         </form>
       </Modal>

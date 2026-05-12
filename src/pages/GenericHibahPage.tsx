@@ -5,7 +5,8 @@ import DataTable from '../components/DataTable';
 import Modal from '../components/Modal';
 import ImportModal from '../components/ImportModal';
 import { getHibahList, createHibah, updateHibah, checkDuplicates } from '../lib/hibahService';
-import { useAuth } from '../lib/authContext';
+import { useAuth } from '../lib/useAuth';
+import { formatRupiah } from '../lib/format';
 import type { Hibah, KategoriHibah, DuplicateWarning } from '../types/hibah';
 
 interface FieldDef {
@@ -16,6 +17,9 @@ interface FieldDef {
   placeholder?: string;
   options?: { value: string; label: string }[];
   colSpan?: number;
+  format?: 'rupiah' | 'tahun';
+  step?: string;
+  min?: number;
 }
 
 interface GenericHibahPageProps {
@@ -54,7 +58,11 @@ export default function GenericHibahPage({
 
   const columns = fields
     .filter((f) => f.type !== 'textarea')
-    .map((f) => ({ key: f.name, label: f.label }));
+    .map((f) => ({
+      key: f.name,
+      label: f.label,
+      ...(f.format ? { format: f.format } : {}),
+    }));
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -179,8 +187,13 @@ export default function GenericHibahPage({
                       value={form[f.name]}
                       onChange={handleChange}
                       placeholder={f.placeholder}
+                      step={f.step}
+                      min={f.min}
                       className="w-full px-3 py-2 rounded-xl border border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none text-sm"
                     />
+                  )}
+                  {f.format === 'rupiah' && Number(form[f.name]) > 0 && (
+                    <p className="text-xs text-gray-500 mt-1">{formatRupiah(form[f.name])}</p>
                   )}
                 </div>
               );
@@ -199,8 +212,12 @@ export default function GenericHibahPage({
               />
             </div>
           ))}
-          <button type="submit" className="px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-sm font-medium flex items-center gap-2">
-            <Save className="w-4 h-4" />{editItem ? 'Simpan Perubahan' : 'Simpan'}
+          <button
+            type="submit"
+            className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 active:scale-95 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-all shadow-sm shadow-cyan-500/30"
+          >
+            <Save className="w-4 h-4" />
+            {editItem ? 'Simpan Perubahan' : 'Simpan'}
           </button>
         </form>
       </Modal>

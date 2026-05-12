@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { BookOpen, LogIn, Eye, EyeOff } from 'lucide-react';
+import { BookOpen, LogIn, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useAuth } from '../lib/authContext';
+import { useAuth } from '../lib/useAuth';
 
 export default function Login() {
   const { login } = useAuth();
@@ -25,19 +25,34 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-cyan-900 via-teal-800 to-emerald-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="relative min-h-screen overflow-hidden flex items-center justify-center p-4 bg-gradient-to-br from-cyan-900 via-teal-800 to-emerald-900">
+      {/* Animated soft blobs for depth */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-32 -left-32 w-96 h-96 rounded-full bg-cyan-400/20 blur-3xl animate-pulse"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-32 -right-32 w-96 h-96 rounded-full bg-emerald-400/20 blur-3xl animate-pulse"
+        style={{ animationDelay: '1.5s' }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(255,255,255,0.06),transparent_60%)]"
+      />
+
+      <div className="relative w-full max-w-md animate-page-in">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-primary-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary-500/25">
+          <div className="w-16 h-16 bg-gradient-to-br from-cyan-400 to-teal-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-cyan-500/40 ring-1 ring-white/30">
             <BookOpen className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white">Si-CAMBAH</h1>
-          <p className="text-slate-400 mt-1">Sistem Catatan dan Manajemen Hibah</p>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Si-CAMBAH</h1>
+          <p className="text-cyan-100/80 mt-1 text-sm">Sistem Catatan dan Manajemen Hibah</p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="bg-white rounded-2xl shadow-xl p-8 space-y-5"
+          className="bg-white/95 backdrop-blur-xl rounded-2xl shadow-2xl p-8 space-y-5 ring-1 ring-white/40"
         >
           <div>
             <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -47,6 +62,7 @@ export default function Login() {
               id="username"
               type="text"
               required
+              autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder="Masukkan username"
@@ -63,6 +79,7 @@ export default function Login() {
                 id="password"
                 type={showPassword ? 'text' : 'password'}
                 required
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Masukkan password"
@@ -71,7 +88,8 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 active:scale-90 transition-all"
+                aria-label={showPassword ? 'Sembunyikan password' : 'Lihat password'}
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -80,18 +98,37 @@ export default function Login() {
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full py-3 bg-primary-600 hover:bg-primary-700 disabled:bg-primary-400 text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm"
+            disabled={loading || !username || !password}
+            className="w-full py-3 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 active:scale-[0.99] disabled:opacity-60 disabled:hover:from-cyan-600 disabled:hover:to-teal-600 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/30"
           >
-            <LogIn className="w-4 h-4" />
-            {loading ? 'Memproses...' : 'Masuk'}
+            {loading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                Memproses...
+              </>
+            ) : (
+              <>
+                <LogIn className="w-4 h-4" />
+                Masuk
+              </>
+            )}
           </button>
 
-          <div className="text-xs text-gray-400 text-center space-y-1 pt-2">
-            <p><strong>Admin:</strong> admin / admin123</p>
-            <p><strong>Operator:</strong> operator / operator123</p>
+          <div className="border-t border-gray-100 pt-4">
+            <div className="flex items-start gap-2 text-xs text-gray-500">
+              <ShieldCheck className="w-3.5 h-3.5 mt-0.5 text-cyan-600 shrink-0" />
+              <div className="space-y-0.5">
+                <p className="font-medium text-gray-600">Akun demo:</p>
+                <p><span className="font-semibold text-gray-700">Admin</span> — admin / admin123</p>
+                <p><span className="font-semibold text-gray-700">Operator</span> — operator / operator123</p>
+              </div>
+            </div>
           </div>
         </form>
+
+        <p className="text-center text-xs text-cyan-100/60 mt-6">
+          © {new Date().getFullYear()} Si-CAMBAH
+        </p>
       </div>
     </div>
   );

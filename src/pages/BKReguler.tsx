@@ -8,7 +8,7 @@ export default function BKRegulerPage() {
       subtitle="Data Bantuan Keuangan Reguler"
       fields={[
         { name: 'bentuk_bk', label: 'Bentuk BK', required: true, placeholder: 'Bentuk bantuan keuangan' },
-        { name: 'total_anggaran', label: 'Total Anggaran', type: 'number', required: true, placeholder: 'Jumlah anggaran' },
+        { name: 'total_anggaran', label: 'Total Anggaran', type: 'number', required: true, placeholder: 'Jumlah anggaran', format: 'rupiah', min: 0 },
         { name: 'sumber_anggaran', label: 'Sumber Anggaran', required: true, placeholder: 'Sumber anggaran' },
         { name: 'tahun', label: 'Tahun', type: 'number', required: true },
         { name: 'keterangan', label: 'Keterangan', type: 'textarea', placeholder: 'Catatan tambahan' },

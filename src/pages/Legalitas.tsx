@@ -3,7 +3,7 @@ import { Search, Plus, Eye, Edit3, Trash2, Save, X, AlertTriangle, FileCheck, Ex
 import toast from 'react-hot-toast';
 import Modal from '../components/Modal';
 import { getLegalitasList, createLegalitas, updateLegalitas, deleteLegalitas } from '../lib/hibahService';
-import { useAuth } from '../lib/authContext';
+import { useAuth } from '../lib/useAuth';
 import type { Legalitas as LegalitasType } from '../types/hibah';
 
 const emptyForm = { nomor_sk: '', judul: '', tanggal: '', link_gdrive: '', keterangan: '' };
