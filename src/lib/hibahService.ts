@@ -1,57 +1,168 @@
-import type { Hibah, KategoriHibah, Legalitas, DuplicateWarning, BansosMasyarakat, LembagaReguler, HibahKelompok } from '../types/hibah';
+// Si-CAMBAH data service — backed by Supabase (single `hibah` table + JSONB
+// `details` column for category-specific fields). Legalitas lives in its own
+// table.
+//
+// `DATA_CHANGE_EVENT` is dispatched after every successful mutation so any
+// listener (Dashboard, page lists) can re-fetch.
 
-const HIBAH_KEY = 'sicambah_hibah';
-const LEGALITAS_KEY = 'sicambah_legalitas';
+import { getSupabase } from './supabase';
+import type {
+  Hibah,
+  KategoriHibah,
+  Legalitas,
+  DuplicateWarning,
+  BansosMasyarakat,
+  LembagaReguler,
+  HibahKelompok,
+} from '../types/hibah';
+
 export const DATA_CHANGE_EVENT = 'sicambah:data-change';
 
-function notifyChange() {
+function notifyChange(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(DATA_CHANGE_EVENT));
   }
 }
 
-function generateId(): string {
-  return crypto.randomUUID();
+// ---------------------------------------------------------------------------
+// DB row shapes
+// ---------------------------------------------------------------------------
+
+interface HibahRow {
+  id: string;
+  kategori: KategoriHibah;
+  tahun: number;
+  keterangan: string;
+  status: 'draft' | 'confirmed';
+  details: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-function getAllHibah(): Hibah[] {
-  const data = localStorage.getItem(HIBAH_KEY);
-  return data ? JSON.parse(data) : [];
+interface LegalitasRow {
+  id: string;
+  nomor_sk: string;
+  judul: string;
+  tanggal: string | null;
+  link_gdrive: string;
+  keterangan: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-function saveAllHibah(data: Hibah[]): void {
-  localStorage.setItem(HIBAH_KEY, JSON.stringify(data));
-  notifyChange();
+const BASE_HIBAH_KEYS = new Set([
+  'id',
+  'kategori',
+  'tahun',
+  'keterangan',
+  'status',
+  'created_by',
+  'created_at',
+  'updated_at',
+]);
+
+function flattenHibah(row: HibahRow): Hibah {
+  return {
+    id: row.id,
+    kategori: row.kategori,
+    tahun: row.tahun,
+    keterangan: row.keterangan,
+    status: row.status,
+    created_by: row.created_by ?? '',
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    ...(row.details ?? {}),
+  } as Hibah;
 }
 
-export function getHibahList(kategori?: KategoriHibah, tahun?: number, search?: string): Hibah[] {
-  let list = getAllHibah();
-  if (kategori) list = list.filter((h) => h.kategori === kategori);
-  if (tahun) list = list.filter((h) => h.tahun === tahun);
+function splitDetails(input: Partial<Hibah>): {
+  base: Partial<HibahRow>;
+  details: Record<string, unknown>;
+  hasDetails: boolean;
+} {
+  const base: Partial<HibahRow> = {};
+  const details: Record<string, unknown> = {};
+  let hasDetails = false;
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) continue;
+    if (BASE_HIBAH_KEYS.has(key)) {
+      (base as Record<string, unknown>)[key] = value;
+    } else {
+      details[key] = value;
+      hasDetails = true;
+    }
+  }
+  return { base, details, hasDetails };
+}
+
+async function getCurrentUserId(): Promise<string | null> {
+  const {
+    data: { user },
+  } = await getSupabase().auth.getUser();
+  return user?.id ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Hibah CRUD
+// ---------------------------------------------------------------------------
+
+export async function getHibahList(
+  kategori?: KategoriHibah,
+  tahun?: number,
+  search?: string,
+): Promise<Hibah[]> {
+  let query = getSupabase()
+    .from('hibah')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (kategori) query = query.eq('kategori', kategori);
+  if (tahun) query = query.eq('tahun', tahun);
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  let list = (data as HibahRow[]).map(flattenHibah);
   if (search) {
     const q = search.toLowerCase();
-    list = list.filter((h) => {
-      const searchable = JSON.stringify(h).toLowerCase();
-      return searchable.includes(q);
-    });
+    list = list.filter((h) => JSON.stringify(h).toLowerCase().includes(q));
   }
-  return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return list;
 }
 
-export function checkDuplicates(newData: Partial<Hibah>): DuplicateWarning[] {
-  const all = getAllHibah();
+export async function getHibahById(id: string): Promise<Hibah | null> {
+  const { data, error } = await getSupabase()
+    .from('hibah')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? flattenHibah(data as HibahRow) : null;
+}
+
+export async function checkDuplicates(
+  newData: Partial<Hibah>,
+): Promise<DuplicateWarning[]> {
+  const supabase = getSupabase();
   const warnings: DuplicateWarning[] = [];
+  const ignoreId = newData.id ?? '00000000-0000-0000-0000-000000000000';
 
   if (newData.kategori === 'bansos_masyarakat') {
     const d = newData as Partial<BansosMasyarakat>;
     if (d.nik) {
-      const dup = all.find(
-        (h) => h.kategori === 'bansos_masyarakat' && (h as BansosMasyarakat).nik === d.nik && h.id !== d.id
-      );
-      if (dup) {
+      const { data } = await supabase
+        .from('hibah')
+        .select('*')
+        .eq('kategori', 'bansos_masyarakat')
+        .eq('details->>nik', d.nik)
+        .neq('id', ignoreId)
+        .limit(1);
+      if (data && data.length > 0) {
+        const dup = flattenHibah(data[0] as HibahRow) as BansosMasyarakat;
         warnings.push({
           type: 'nik',
-          message: `NIK ${d.nik} sudah terdaftar sebagai penerima bansos atas nama "${(dup as BansosMasyarakat).nama}"`,
+          message: `NIK ${d.nik} sudah terdaftar sebagai penerima bansos atas nama "${dup.nama}"`,
           existingData: dup,
         });
       }
@@ -61,14 +172,16 @@ export function checkDuplicates(newData: Partial<Hibah>): DuplicateWarning[] {
   if (newData.kategori === 'lembaga_reguler') {
     const d = newData as Partial<LembagaReguler>;
     if (d.nama_lembaga && d.alamat) {
-      const dup = all.find(
-        (h) =>
-          h.kategori === 'lembaga_reguler' &&
-          (h as LembagaReguler).nama_lembaga.toLowerCase() === d.nama_lembaga!.toLowerCase() &&
-          (h as LembagaReguler).alamat.toLowerCase() === d.alamat!.toLowerCase() &&
-          h.id !== d.id
-      );
-      if (dup) {
+      const { data } = await supabase
+        .from('hibah')
+        .select('*')
+        .eq('kategori', 'lembaga_reguler')
+        .ilike('details->>nama_lembaga', d.nama_lembaga)
+        .ilike('details->>alamat', d.alamat)
+        .neq('id', ignoreId)
+        .limit(1);
+      if (data && data.length > 0) {
+        const dup = flattenHibah(data[0] as HibahRow) as LembagaReguler;
         warnings.push({
           type: 'nama_alamat',
           message: `Lembaga "${d.nama_lembaga}" di "${d.alamat}" sudah pernah menerima hibah (tahun ${dup.tahun})`,
@@ -81,15 +194,17 @@ export function checkDuplicates(newData: Partial<Hibah>): DuplicateWarning[] {
   if (newData.kategori === 'hibah_kelompok') {
     const d = newData as Partial<HibahKelompok>;
     if (d.nama_kelompok && d.alamat && d.kategori_kelompok) {
-      const dup = all.find(
-        (h) =>
-          h.kategori === 'hibah_kelompok' &&
-          (h as HibahKelompok).nama_kelompok.toLowerCase() === d.nama_kelompok!.toLowerCase() &&
-          (h as HibahKelompok).alamat.toLowerCase() === d.alamat!.toLowerCase() &&
-          (h as HibahKelompok).kategori_kelompok === d.kategori_kelompok &&
-          h.id !== d.id
-      );
-      if (dup) {
+      const { data } = await supabase
+        .from('hibah')
+        .select('*')
+        .eq('kategori', 'hibah_kelompok')
+        .ilike('details->>nama_kelompok', d.nama_kelompok)
+        .ilike('details->>alamat', d.alamat)
+        .eq('details->>kategori_kelompok', d.kategori_kelompok)
+        .neq('id', ignoreId)
+        .limit(1);
+      if (data && data.length > 0) {
+        const dup = flattenHibah(data[0] as HibahRow) as HibahKelompok;
         warnings.push({
           type: 'kelompok',
           message: `Kelompok "${d.nama_kelompok}" (${d.kategori_kelompok}) di "${d.alamat}" sudah pernah menerima hibah (tahun ${dup.tahun})`,
@@ -102,127 +217,235 @@ export function checkDuplicates(newData: Partial<Hibah>): DuplicateWarning[] {
   return warnings;
 }
 
-export function createHibah(input: Omit<Hibah, 'id' | 'created_at' | 'updated_at'>): Hibah {
-  const now = new Date().toISOString();
-  const newHibah = {
-    ...input,
-    id: generateId(),
-    created_at: now,
-    updated_at: now,
-  } as Hibah;
-  const list = getAllHibah();
-  list.push(newHibah);
-  saveAllHibah(list);
-  return newHibah;
+export type CreateHibahInput = Omit<
+  Hibah,
+  'id' | 'created_at' | 'updated_at' | 'created_by'
+>;
+
+export async function createHibah(
+  input: CreateHibahInput,
+): Promise<Hibah> {
+  const { base, details } = splitDetails(input as Partial<Hibah>);
+  const created_by = await getCurrentUserId();
+  if (!created_by) {
+    throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
+  }
+
+  const { data, error } = await getSupabase()
+    .from('hibah')
+    .insert({
+      kategori: base.kategori,
+      tahun: base.tahun,
+      keterangan: base.keterangan ?? '',
+      status: base.status ?? 'draft',
+      details,
+      created_by,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+
+  notifyChange();
+  return flattenHibah(data as HibahRow);
 }
 
-export function updateHibah(id: string, input: Partial<Hibah>): Hibah {
-  const list = getAllHibah();
-  const index = list.findIndex((h) => h.id === id);
-  if (index === -1) throw new Error('Data tidak ditemukan');
-  list[index] = { ...list[index], ...input, updated_at: new Date().toISOString() } as Hibah;
-  saveAllHibah(list);
-  return list[index];
+export async function updateHibah(
+  id: string,
+  input: Partial<Hibah>,
+): Promise<Hibah> {
+  const { base, details: newDetails, hasDetails } = splitDetails(input);
+  const update: Partial<HibahRow> = { ...base };
+  delete (update as { id?: string }).id;
+  delete (update as { created_at?: string }).created_at;
+  delete (update as { updated_at?: string }).updated_at;
+  delete (update as { created_by?: string | null }).created_by;
+
+  if (hasDetails) {
+    // Merge with existing details so partial updates don't clobber other keys.
+    const { data: existing, error: fetchErr } = await getSupabase()
+      .from('hibah')
+      .select('details')
+      .eq('id', id)
+      .single();
+    if (fetchErr) throw new Error(fetchErr.message);
+    update.details = {
+      ...((existing as { details?: Record<string, unknown> } | null)?.details ?? {}),
+      ...newDetails,
+    };
+  }
+
+  const { data, error } = await getSupabase()
+    .from('hibah')
+    .update(update)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+
+  notifyChange();
+  return flattenHibah(data as HibahRow);
 }
 
-export function deleteHibah(id: string): void {
-  const list = getAllHibah().filter((h) => h.id !== id);
-  saveAllHibah(list);
+export async function deleteHibah(id: string): Promise<void> {
+  const { error } = await getSupabase().from('hibah').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  notifyChange();
 }
 
-export function confirmHibah(id: string): Hibah {
+export async function confirmHibah(id: string): Promise<Hibah> {
   return updateHibah(id, { status: 'confirmed' });
 }
 
-export function revertHibah(id: string): Hibah {
+export async function revertHibah(id: string): Promise<Hibah> {
   return updateHibah(id, { status: 'draft' });
 }
 
-export function importHibah(items: Omit<Hibah, 'id' | 'created_at' | 'updated_at'>[]): { imported: number; duplicates: number } {
+export async function importHibah(
+  items: CreateHibahInput[],
+): Promise<{ imported: number; duplicates: number }> {
   let imported = 0;
   let duplicates = 0;
   for (const item of items) {
-    const dups = checkDuplicates(item as Partial<Hibah>);
-    if (dups.length > 0) {
-      duplicates++;
-    }
-    createHibah(item);
+    const dups = await checkDuplicates(item as Partial<Hibah>);
+    if (dups.length > 0) duplicates++;
+    await createHibah(item);
     imported++;
   }
   return { imported, duplicates };
 }
 
-export function getStats(): {
+// ---------------------------------------------------------------------------
+// Stats / aggregations
+// ---------------------------------------------------------------------------
+
+export interface HibahStats {
   byKategori: Record<string, number>;
   byTahun: Record<number, number>;
   byKategoriTahun: Record<string, Record<number, number>>;
   total: number;
-} {
-  const all = getAllHibah();
+}
+
+export async function getStats(): Promise<HibahStats> {
+  const { data, error } = await getSupabase()
+    .from('hibah')
+    .select('kategori, tahun');
+  if (error) throw new Error(error.message);
+
+  const rows = (data ?? []) as Pick<HibahRow, 'kategori' | 'tahun'>[];
   const byKategori: Record<string, number> = {};
   const byTahun: Record<number, number> = {};
   const byKategoriTahun: Record<string, Record<number, number>> = {};
 
-  for (const h of all) {
+  for (const h of rows) {
     byKategori[h.kategori] = (byKategori[h.kategori] || 0) + 1;
     byTahun[h.tahun] = (byTahun[h.tahun] || 0) + 1;
     if (!byKategoriTahun[h.kategori]) byKategoriTahun[h.kategori] = {};
-    byKategoriTahun[h.kategori][h.tahun] = (byKategoriTahun[h.kategori][h.tahun] || 0) + 1;
+    byKategoriTahun[h.kategori][h.tahun] =
+      (byKategoriTahun[h.kategori][h.tahun] || 0) + 1;
   }
 
-  return { byKategori, byTahun, byKategoriTahun, total: all.length };
+  return { byKategori, byTahun, byKategoriTahun, total: rows.length };
 }
 
-export function getAvailableYears(): number[] {
-  const all = getAllHibah();
-  const years = [...new Set(all.map((h) => h.tahun))];
+export async function getAvailableYears(): Promise<number[]> {
+  const { data, error } = await getSupabase()
+    .from('hibah')
+    .select('tahun');
+  if (error) throw new Error(error.message);
+  const years = [...new Set((data ?? []).map((r) => (r as { tahun: number }).tahun))];
   return years.sort((a, b) => b - a);
 }
 
-// Legalitas
-function getAllLegalitas(): Legalitas[] {
-  const data = localStorage.getItem(LEGALITAS_KEY);
-  return data ? JSON.parse(data) : [];
+// ---------------------------------------------------------------------------
+// Legalitas CRUD
+// ---------------------------------------------------------------------------
+
+function flattenLegalitas(row: LegalitasRow): Legalitas {
+  return {
+    id: row.id,
+    nomor_sk: row.nomor_sk,
+    judul: row.judul,
+    tanggal: row.tanggal ?? '',
+    link_gdrive: row.link_gdrive,
+    keterangan: row.keterangan,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 }
 
-function saveAllLegalitas(data: Legalitas[]): void {
-  localStorage.setItem(LEGALITAS_KEY, JSON.stringify(data));
-  notifyChange();
-}
+export async function getLegalitasList(search?: string): Promise<Legalitas[]> {
+  const { data, error } = await getSupabase()
+    .from('legalitas')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
 
-export function getLegalitasList(search?: string): Legalitas[] {
-  let list = getAllLegalitas();
+  let list = (data as LegalitasRow[]).map(flattenLegalitas);
   if (search) {
     const q = search.toLowerCase();
     list = list.filter(
       (l) =>
         l.nomor_sk.toLowerCase().includes(q) ||
         l.judul.toLowerCase().includes(q) ||
-        l.keterangan.toLowerCase().includes(q)
+        l.keterangan.toLowerCase().includes(q),
     );
   }
-  return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return list;
 }
 
-export function createLegalitas(input: Omit<Legalitas, 'id' | 'created_at' | 'updated_at'>): Legalitas {
-  const now = new Date().toISOString();
-  const item: Legalitas = { ...input, id: generateId(), created_at: now, updated_at: now };
-  const list = getAllLegalitas();
-  list.push(item);
-  saveAllLegalitas(list);
-  return item;
+export type CreateLegalitasInput = Omit<
+  Legalitas,
+  'id' | 'created_at' | 'updated_at'
+>;
+
+export async function createLegalitas(
+  input: CreateLegalitasInput,
+): Promise<Legalitas> {
+  const created_by = await getCurrentUserId();
+  if (!created_by) {
+    throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
+  }
+  const { data, error } = await getSupabase()
+    .from('legalitas')
+    .insert({
+      nomor_sk: input.nomor_sk,
+      judul: input.judul,
+      tanggal: input.tanggal || null,
+      link_gdrive: input.link_gdrive ?? '',
+      keterangan: input.keterangan ?? '',
+      created_by,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  notifyChange();
+  return flattenLegalitas(data as LegalitasRow);
 }
 
-export function updateLegalitas(id: string, input: Partial<Legalitas>): Legalitas {
-  const list = getAllLegalitas();
-  const idx = list.findIndex((l) => l.id === id);
-  if (idx === -1) throw new Error('Data tidak ditemukan');
-  list[idx] = { ...list[idx], ...input, updated_at: new Date().toISOString() };
-  saveAllLegalitas(list);
-  return list[idx];
+export async function updateLegalitas(
+  id: string,
+  input: Partial<Legalitas>,
+): Promise<Legalitas> {
+  const update: Partial<LegalitasRow> = {};
+  if (input.nomor_sk !== undefined) update.nomor_sk = input.nomor_sk;
+  if (input.judul !== undefined) update.judul = input.judul;
+  if (input.tanggal !== undefined) update.tanggal = input.tanggal || null;
+  if (input.link_gdrive !== undefined) update.link_gdrive = input.link_gdrive;
+  if (input.keterangan !== undefined) update.keterangan = input.keterangan;
+
+  const { data, error } = await getSupabase()
+    .from('legalitas')
+    .update(update)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  notifyChange();
+  return flattenLegalitas(data as LegalitasRow);
 }
 
-export function deleteLegalitas(id: string): void {
-  const list = getAllLegalitas().filter((l) => l.id !== id);
-  saveAllLegalitas(list);
+export async function deleteLegalitas(id: string): Promise<void> {
+  const { error } = await getSupabase().from('legalitas').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  notifyChange();
 }

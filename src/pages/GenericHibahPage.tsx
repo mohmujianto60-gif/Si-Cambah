@@ -1,11 +1,17 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Save, AlertTriangle } from 'lucide-react';
 import DataTable from '../components/DataTable';
 import Modal from '../components/Modal';
 import ImportModal from '../components/ImportModal';
-import { getHibahList, createHibah, updateHibah, checkDuplicates } from '../lib/hibahService';
-import { useAuth } from '../lib/useAuth';
+import {
+  getHibahList,
+  createHibah,
+  updateHibah,
+  checkDuplicates,
+  type CreateHibahInput,
+} from '../lib/hibahService';
+import { useAsyncData } from '../lib/useAsyncData';
 import { formatRupiah } from '../lib/format';
 import type { Hibah, KategoriHibah, DuplicateWarning } from '../types/hibah';
 
@@ -28,7 +34,10 @@ interface GenericHibahPageProps {
   subtitle: string;
   fields: FieldDef[];
   searchPlaceholder?: string;
-  checkDup?: (form: Record<string, string | number>, editId?: string) => DuplicateWarning[];
+  checkDup?: (
+    form: Record<string, string | number>,
+    editId?: string,
+  ) => Promise<DuplicateWarning[]> | DuplicateWarning[];
 }
 
 export default function GenericHibahPage({
@@ -39,22 +48,20 @@ export default function GenericHibahPage({
   searchPlaceholder,
   checkDup,
 }: GenericHibahPageProps) {
-  const { user } = useAuth();
-
   const emptyForm: Record<string, string | number> = {};
   for (const f of fields) {
     emptyForm[f.name] = f.type === 'number' ? 0 : f.name === 'tahun' ? new Date().getFullYear() : '';
   }
   if (!emptyForm['tahun']) emptyForm['tahun'] = new Date().getFullYear();
 
-  const [data, setData] = useState<Hibah[]>(() => getHibahList(kategori));
+  const fetcher = useCallback(() => getHibahList(kategori), [kategori]);
+  const { data, loading, refresh } = useAsyncData<Hibah[]>(fetcher, []);
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [editItem, setEditItem] = useState<Hibah | null>(null);
   const [form, setForm] = useState<Record<string, string | number>>(emptyForm);
   const [dupWarnings, setDupWarnings] = useState<string[]>([]);
-
-  const refresh = useCallback(() => setData(getHibahList(kategori)), [kategori]);
+  const [submitting, setSubmitting] = useState(false);
 
   const columns = fields
     .filter((f) => f.type !== 'textarea')
@@ -64,40 +71,57 @@ export default function GenericHibahPage({
       ...(f.format ? { format: f.format } : {}),
     }));
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  const handleChange = async (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+  ) => {
     const { name, value } = e.target;
     const field = fields.find((f) => f.name === name);
     const newForm = { ...form, [name]: field?.type === 'number' || name === 'tahun' ? Number(value) : value };
     setForm(newForm);
 
-    if (checkDup) {
-      const warnings = checkDup(newForm, editItem?.id);
-      setDupWarnings(warnings.map((w) => w.message));
-    } else {
-      const autoCheck = checkDuplicates({ ...newForm, kategori, id: editItem?.id } as unknown as Partial<Hibah>);
-      setDupWarnings(autoCheck.map((w) => w.message));
+    try {
+      if (checkDup) {
+        const warnings = await checkDup(newForm, editItem?.id);
+        setDupWarnings(warnings.map((w) => w.message));
+      } else {
+        const autoCheck = await checkDuplicates({
+          ...newForm,
+          kategori,
+          id: editItem?.id,
+        } as unknown as Partial<Hibah>);
+        setDupWarnings(autoCheck.map((w) => w.message));
+      }
+    } catch {
+      // Don't surface duplicate check errors — they're informational only.
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editItem) {
-      updateHibah(editItem.id, form as Partial<Hibah>);
-      toast.success('Data berhasil diperbarui');
-    } else {
-      createHibah({
-        ...form,
-        kategori,
-        status: 'draft',
-        created_by: user?.email || "",
-      } as Omit<Hibah, 'id' | 'created_at' | 'updated_at'>);
-      toast.success('Data berhasil ditambahkan');
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      if (editItem) {
+        await updateHibah(editItem.id, form as Partial<Hibah>);
+        toast.success('Data berhasil diperbarui');
+      } else {
+        await createHibah({
+          ...form,
+          kategori,
+          status: 'draft',
+        } as CreateHibahInput);
+        toast.success('Data berhasil ditambahkan');
+      }
+      setShowForm(false);
+      setEditItem(null);
+      setForm({ ...emptyForm });
+      setDupWarnings([]);
+      refresh();
+    } catch (err) {
+      toast.error('Gagal menyimpan: ' + (err as Error).message);
+    } finally {
+      setSubmitting(false);
     }
-    setShowForm(false);
-    setEditItem(null);
-    setForm({ ...emptyForm });
-    setDupWarnings([]);
-    refresh();
   };
 
   const handleEdit = (item: Hibah) => {
@@ -111,23 +135,32 @@ export default function GenericHibahPage({
     setShowForm(true);
   };
 
-  const handleImport = (rows: Record<string, string>[]) => {
+  const handleImport = async (rows: Record<string, string>[]) => {
+    const toastId = toast.loading(`Mengimport ${rows.length} data...`);
     let count = 0;
+    let failed = 0;
     for (const row of rows) {
-      const importForm: Record<string, string | number> = {};
-      for (const f of fields) {
-        const val = row[f.label] || row[f.name] || '';
-        importForm[f.name] = f.type === 'number' || f.name === 'tahun' ? Number(val) || 0 : val;
+      try {
+        const importForm: Record<string, string | number> = {};
+        for (const f of fields) {
+          const val = row[f.label] || row[f.name] || '';
+          importForm[f.name] = f.type === 'number' || f.name === 'tahun' ? Number(val) || 0 : val;
+        }
+        await createHibah({
+          ...importForm,
+          kategori,
+          status: 'draft',
+        } as CreateHibahInput);
+        count++;
+      } catch {
+        failed++;
       }
-      createHibah({
-        ...importForm,
-        kategori,
-        status: 'draft',
-        created_by: user?.email || "",
-      } as Omit<Hibah, 'id' | 'created_at' | 'updated_at'>);
-      count++;
     }
-    toast.success(`${count} data berhasil diimport`);
+    if (failed > 0) {
+      toast.error(`${count} berhasil, ${failed} gagal`, { id: toastId });
+    } else {
+      toast.success(`${count} data berhasil diimport`, { id: toastId });
+    }
     refresh();
   };
 
@@ -137,6 +170,7 @@ export default function GenericHibahPage({
         title={title}
         subtitle={subtitle}
         data={data}
+        loading={loading}
         columns={columns}
         onAdd={() => { setEditItem(null); setForm({ ...emptyForm }); setDupWarnings([]); setShowForm(true); }}
         onImport={() => setShowImport(true)}
@@ -214,9 +248,14 @@ export default function GenericHibahPage({
           ))}
           <button
             type="submit"
-            className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 active:scale-95 text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-all shadow-sm shadow-cyan-500/30"
+            disabled={submitting}
+            className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-700 hover:to-teal-700 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-xl text-sm font-medium flex items-center gap-2 transition-all shadow-sm shadow-cyan-500/30"
           >
-            <Save className="w-4 h-4" />
+            {submitting ? (
+              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+            ) : (
+              <Save className="w-4 h-4" />
+            )}
             {editItem ? 'Simpan Perubahan' : 'Simpan'}
           </button>
         </form>

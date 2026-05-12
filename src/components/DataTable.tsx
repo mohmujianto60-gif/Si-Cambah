@@ -37,6 +37,7 @@ interface DataTableProps {
   title: string;
   subtitle: string;
   data: Hibah[];
+  loading?: boolean;
   columns: Column[];
   onAdd: () => void;
   onImport: () => void;
@@ -57,6 +58,7 @@ export default function DataTable({
   title,
   subtitle,
   data,
+  loading = false,
   columns,
   onAdd,
   onImport,
@@ -96,23 +98,35 @@ export default function DataTable({
     return applyFormat(value, col.format);
   };
 
-  const handleDelete = (id: string) => {
-    deleteHibah(id);
-    setDeleteConfirm(null);
-    onRefresh();
-    toast.success('Data berhasil dihapus');
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteHibah(id);
+      setDeleteConfirm(null);
+      onRefresh();
+      toast.success('Data berhasil dihapus');
+    } catch (err) {
+      toast.error('Gagal menghapus: ' + (err as Error).message);
+    }
   };
 
-  const handleConfirm = (id: string) => {
-    confirmHibah(id);
-    onRefresh();
-    toast.success('Data berhasil dikonfirmasi');
+  const handleConfirm = async (id: string) => {
+    try {
+      await confirmHibah(id);
+      onRefresh();
+      toast.success('Data berhasil dikonfirmasi');
+    } catch (err) {
+      toast.error('Gagal mengonfirmasi: ' + (err as Error).message);
+    }
   };
 
-  const handleRevert = (id: string) => {
-    revertHibah(id);
-    onRefresh();
-    toast.success('Status dikembalikan ke draft');
+  const handleRevert = async (id: string) => {
+    try {
+      await revertHibah(id);
+      onRefresh();
+      toast.success('Status dikembalikan ke draft');
+    } catch (err) {
+      toast.error('Gagal mengembalikan: ' + (err as Error).message);
+    }
   };
 
   const handleDownloadTemplate = () => {
@@ -220,10 +234,24 @@ export default function DataTable({
       </div>
 
       <p className="text-xs text-gray-500">
-        Menampilkan {filtered.length} dari {data.length} data
+        {loading ? 'Memuat data...' : `Menampilkan ${filtered.length} dari ${data.length} data`}
       </p>
 
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/50 shadow-sm p-6 space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex gap-3">
+              {columns.slice(0, 5).map((_, j) => (
+                <div
+                  key={j}
+                  className="h-5 bg-gray-100 rounded flex-1 animate-pulse"
+                  style={{ animationDelay: `${i * 80 + j * 40}ms` }}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/50 p-12 text-center text-gray-500 animate-fade-in">
           {hasFilters ? (
             <>

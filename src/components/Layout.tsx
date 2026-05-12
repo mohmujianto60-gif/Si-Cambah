@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -19,8 +19,11 @@ import {
   Banknote,
   PanelLeftClose,
   PanelLeftOpen,
+  DatabaseBackup,
 } from 'lucide-react';
 import { useAuth } from '../lib/useAuth';
+import MigrationModal from './MigrationModal';
+import { getLocalDataStatus } from '../lib/migrateLocalStorage';
 
 interface NavLink {
   type: 'link';
@@ -95,10 +98,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [openSubGroups, setOpenSubGroups] = useState<Record<string, boolean>>({ 'Bantuan Keuangan': true, 'Hibah Lembaga': true });
   const toggleSubGroup = (label: string) => setOpenSubGroups((prev) => ({ ...prev, [label]: !prev[label] }));
   const location = useLocation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   const handleSignOut = () => {
     void signOut();
   };
+
+  const [migrationOpen, setMigrationOpen] = useState(false);
+  const [localDataCount, setLocalDataCount] = useState(0);
+  useEffect(() => {
+    if (!isAdmin) return;
+    const update = () => {
+      const s = getLocalDataStatus();
+      setLocalDataCount(s.hibahCount + s.legalitasCount);
+    };
+    update();
+    window.addEventListener('storage', update);
+    return () => window.removeEventListener('storage', update);
+  }, [isAdmin, migrationOpen]);
 
   const sidebarWidth = collapsed ? 'w-[68px]' : 'w-72';
   const mainMargin = collapsed ? 'lg:ml-[68px]' : 'lg:ml-72';
@@ -303,6 +319,29 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             )}
           </button>
 
+          {/* Migration prompt — admin only, only when local data exists */}
+          {isAdmin && localDataCount > 0 && !collapsed && (
+            <button
+              onClick={() => setMigrationOpen(true)}
+              className="w-full flex items-center gap-2 px-3 py-2 mx-0 mb-1 text-xs font-medium text-amber-300 hover:text-amber-200 hover:bg-amber-900/20 transition-colors"
+              title="Ada data di localStorage browser ini — pindahkan ke Supabase"
+            >
+              <DatabaseBackup className="w-4 h-4 shrink-0" />
+              <span className="text-left flex-1 truncate">
+                Migrasi {localDataCount} data lokal
+              </span>
+            </button>
+          )}
+          {isAdmin && localDataCount > 0 && collapsed && (
+            <button
+              onClick={() => setMigrationOpen(true)}
+              className="w-full flex items-center justify-center p-2 text-amber-300 hover:text-amber-200 hover:bg-amber-900/20 transition-colors"
+              title={`Migrasi ${localDataCount} data lokal ke Supabase`}
+            >
+              <DatabaseBackup className="w-4 h-4" />
+            </button>
+          )}
+
           {/* User info */}
           {user && (
             <div className={`${collapsed ? 'p-2' : 'p-4'} border-t border-teal-800/50`}>
@@ -325,6 +364,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           )}
         </div>
       </aside>
+
+      <MigrationModal
+        isOpen={migrationOpen}
+        onClose={() => setMigrationOpen(false)}
+      />
 
       <main className={`${mainMargin} pt-16 lg:pt-0 min-h-screen transition-all duration-200`}>
         <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">{children}</div>
