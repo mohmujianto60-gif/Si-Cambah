@@ -300,6 +300,42 @@ export async function revertHibah(id: string): Promise<Hibah> {
   return updateHibah(id, { status: 'draft' });
 }
 
+/**
+ * Bulk delete multiple hibah rows by id. Returns the number of rows
+ * actually deleted (may be less than ids.length if RLS hides some rows
+ * from the current user).
+ */
+export async function bulkDeleteHibah(ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const { data, error } = await getSupabase()
+    .from('hibah')
+    .delete()
+    .in('id', ids)
+    .select('id');
+  if (error) throw new Error(error.message);
+  notifyChange();
+  return (data ?? []).length;
+}
+
+/**
+ * Bulk update status for multiple hibah rows. Returns the number of
+ * rows actually updated.
+ */
+export async function bulkUpdateStatus(
+  ids: string[],
+  status: 'draft' | 'confirmed',
+): Promise<number> {
+  if (ids.length === 0) return 0;
+  const { data, error } = await getSupabase()
+    .from('hibah')
+    .update({ status })
+    .in('id', ids)
+    .select('id');
+  if (error) throw new Error(error.message);
+  notifyChange();
+  return (data ?? []).length;
+}
+
 export async function importHibah(
   items: CreateHibahInput[],
 ): Promise<{ imported: number; duplicates: number }> {

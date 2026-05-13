@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './lib/authContext';
+import { ThemeProvider } from './lib/ThemeProvider';
 import { useAuth } from './lib/useAuth';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -77,18 +78,20 @@ function AppRoutes() {
 
 function App() {
   return (
-    <HashRouter>
-      <AuthProvider>
-        <AppRoutes />
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            duration: 3000,
-            style: { borderRadius: '12px', fontSize: '14px' },
-          }}
-        />
-      </AuthProvider>
-    </HashRouter>
+    <ThemeProvider>
+      <HashRouter>
+        <AuthProvider>
+          <AppRoutes />
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              duration: 3000,
+              style: { borderRadius: '12px', fontSize: '14px' },
+            }}
+          />
+        </AuthProvider>
+      </HashRouter>
+    </ThemeProvider>
   );
 }
 

@@ -8,7 +8,9 @@ import {
   AlertCircle,
   PieChart as PieIcon,
   LineChart as LineIcon,
+  FileDown,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import {
   PieChart,
   Pie,
@@ -38,6 +40,7 @@ import {
 import StatCard from '../components/StatCard';
 import ChartCard from '../components/ChartCard';
 import { useAuth } from '../lib/useAuth';
+import { exportDashboardPdf } from '../lib/dashboardPdfExport';
 
 interface DashboardData {
   stats: HibahStats;
@@ -173,6 +176,19 @@ export default function Dashboard() {
     return 'Selamat malam';
   })();
 
+  const handleExportPdf = () => {
+    try {
+      exportDashboardPdf(stats, years, {
+        year: selectedYear === 'all' ? undefined : selectedYear,
+        userName: user?.nama,
+        userRole: user?.role,
+      });
+      toast.success('Rekap PDF berhasil diunduh');
+    } catch (err) {
+      toast.error('Gagal membuat PDF: ' + (err as Error).message);
+    }
+  };
+
   return (
     <div className="space-y-8 animate-page-in">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -186,12 +202,24 @@ export default function Dashboard() {
             hibah.
           </p>
         </div>
-        {!loading && stats.total > 0 && (
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-50 border border-cyan-200/70 text-cyan-700 text-xs font-medium shadow-sm">
-            <Sparkles className="w-3.5 h-3.5" />
-            {stats.total} total data tercatat
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {!loading && stats.total > 0 && (
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-50 border border-cyan-200/70 text-cyan-700 text-xs font-medium shadow-sm">
+              <Sparkles className="w-3.5 h-3.5" />
+              {stats.total} total data tercatat
+            </div>
+          )}
+          {!loading && stats.total > 0 && (
+            <button
+              onClick={handleExportPdf}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white border border-cyan-200 text-cyan-700 text-xs font-medium shadow-sm hover:bg-cyan-50 hover:border-cyan-300 active:scale-95 transition-all"
+              title="Unduh rekap dashboard (PDF)"
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              Rekap PDF
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (

@@ -15,10 +15,17 @@ import {
   Filter,
   RotateCcw,
   Database,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../lib/useAuth';
-import { deleteHibah, confirmHibah, revertHibah } from '../lib/hibahService';
+import {
+  deleteHibah,
+  confirmHibah,
+  revertHibah,
+  bulkDeleteHibah,
+  bulkUpdateStatus,
+} from '../lib/hibahService';
 import { downloadTemplate, exportToExcel, exportToPDF } from '../lib/exportUtils';
 import { formatRupiah } from '../lib/format';
 import Modal from './Modal';
@@ -74,6 +81,11 @@ export default function DataTable({
   const [selectedItem, setSelectedItem] = useState<Hibah | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
+  // Bulk-action state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+
   const availableYears = useMemo(() => {
     const years = new Set<number>();
     for (const row of data) {
@@ -84,13 +96,57 @@ export default function DataTable({
 
   const fname = exportFilename || title.replace(/[^a-zA-Z0-9]/g, '_');
 
-  const filtered = data.filter((row) => {
-    if (filterYear && row.tahun !== Number(filterYear)) return false;
-    if (filterStatus && row.status !== filterStatus) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return JSON.stringify(row).toLowerCase().includes(q);
-  });
+  const filtered = useMemo(() => {
+    return data.filter((row) => {
+      if (filterYear && row.tahun !== Number(filterYear)) return false;
+      if (filterStatus && row.status !== filterStatus) return false;
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return JSON.stringify(row).toLowerCase().includes(q);
+    });
+  }, [data, filterYear, filterStatus, search]);
+
+  // selectedRows derives from intersection with `filtered`, so stale ids
+  // (rows that disappear after a filter change or refresh) are ignored.
+  // No effect needed to clean up state.
+  const selectedRows = useMemo(
+    () => filtered.filter((r) => selectedIds.has(r.id)),
+    [filtered, selectedIds],
+  );
+  const visibleSelectedCount = selectedRows.length;
+  const allSelected =
+    filtered.length > 0 && visibleSelectedCount === filtered.length;
+  const someSelected = visibleSelectedCount > 0 && !allSelected;
+  // Operator hanya bisa menghapus draft mereka sendiri lewat RLS. Untuk
+  // UI bulk action, kita izinkan semua operator-actions kalau admin,
+  // atau hanya rows draft kalau bukan admin.
+  const bulkDeletableCount = isAdmin
+    ? selectedRows.length
+    : selectedRows.filter((r) => r.status === 'draft').length;
+  const bulkConfirmableCount = selectedRows.filter(
+    (r) => r.status === 'draft',
+  ).length;
+  const bulkRevertableCount = isAdmin
+    ? selectedRows.filter((r) => r.status === 'confirmed').length
+    : 0;
+
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelectedIds(() => {
+      if (allSelected) return new Set();
+      return new Set(filtered.map((r) => r.id));
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
 
   const renderCell = (col: Column, row: Hibah): React.ReactNode => {
     const value = (row as unknown as Record<string, unknown>)[col.key];
@@ -126,6 +182,66 @@ export default function DataTable({
       toast.success('Status dikembalikan ke draft');
     } catch (err) {
       toast.error('Gagal mengembalikan: ' + (err as Error).message);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const deletableIds = (isAdmin
+      ? selectedRows
+      : selectedRows.filter((r) => r.status === 'draft')
+    ).map((r) => r.id);
+    if (deletableIds.length === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      const count = await bulkDeleteHibah(deletableIds);
+      setBulkDeleteOpen(false);
+      clearSelection();
+      onRefresh();
+      if (count === 0) {
+        toast.error('Tidak ada data yang dihapus (mungkin tidak punya izin).');
+      } else {
+        toast.success(`${count} data berhasil dihapus`);
+      }
+    } catch (err) {
+      toast.error('Gagal menghapus: ' + (err as Error).message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkConfirm = async () => {
+    const draftIds = selectedRows
+      .filter((r) => r.status === 'draft')
+      .map((r) => r.id);
+    if (draftIds.length === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      const count = await bulkUpdateStatus(draftIds, 'confirmed');
+      clearSelection();
+      onRefresh();
+      toast.success(`${count} data dikonfirmasi`);
+    } catch (err) {
+      toast.error('Gagal mengonfirmasi: ' + (err as Error).message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkRevert = async () => {
+    const confirmedIds = selectedRows
+      .filter((r) => r.status === 'confirmed')
+      .map((r) => r.id);
+    if (confirmedIds.length === 0 || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      const count = await bulkUpdateStatus(confirmedIds, 'draft');
+      clearSelection();
+      onRefresh();
+      toast.success(`${count} data dikembalikan ke draft`);
+    } catch (err) {
+      toast.error('Gagal mengembalikan: ' + (err as Error).message);
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -233,9 +349,62 @@ export default function DataTable({
         </div>
       </div>
 
-      <p className="text-xs text-gray-500">
-        {loading ? 'Memuat data...' : `Menampilkan ${filtered.length} dari ${data.length} data`}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-gray-500">
+          {loading
+            ? 'Memuat data...'
+            : `Menampilkan ${filtered.length} dari ${data.length} data`}
+        </p>
+        {visibleSelectedCount > 0 && (
+          <div className="inline-flex items-center gap-2 bg-cyan-50 border border-cyan-200 rounded-xl px-2.5 py-1.5 shadow-sm animate-fade-in">
+            <span className="text-xs font-semibold text-cyan-800">
+              {visibleSelectedCount} dipilih
+            </span>
+            <span className="h-4 w-px bg-cyan-200" />
+            {bulkConfirmableCount > 0 && (
+              <button
+                onClick={handleBulkConfirm}
+                disabled={bulkBusy}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title={`Konfirmasi ${bulkConfirmableCount} data draft`}
+              >
+                <CheckCircle className="w-3.5 h-3.5" />
+                Konfirmasi ({bulkConfirmableCount})
+              </button>
+            )}
+            {bulkRevertableCount > 0 && (
+              <button
+                onClick={handleBulkRevert}
+                disabled={bulkBusy}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title={`Kembalikan ${bulkRevertableCount} data ke draft`}
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Kembalikan ({bulkRevertableCount})
+              </button>
+            )}
+            {bulkDeletableCount > 0 && (
+              <button
+                onClick={() => setBulkDeleteOpen(true)}
+                disabled={bulkBusy}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title={`Hapus ${bulkDeletableCount} data`}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Hapus ({bulkDeletableCount})
+              </button>
+            )}
+            <button
+              onClick={clearSelection}
+              disabled={bulkBusy}
+              className="inline-flex items-center gap-1 px-1.5 py-1 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+              title="Batal pilih semua"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
 
       {loading ? (
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/50 shadow-sm p-6 space-y-3">
@@ -293,6 +462,23 @@ export default function DataTable({
               <table className="w-full">
                 <thead>
                   <tr className="text-left text-xs text-gray-500 border-b border-gray-100 bg-gray-50">
+                    <th className="pl-4 pr-1 py-3 w-10">
+                      <label
+                        className="flex items-center justify-center cursor-pointer"
+                        title={allSelected ? 'Batal pilih semua' : 'Pilih semua'}
+                      >
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-0 cursor-pointer"
+                          checked={allSelected}
+                          ref={(el) => {
+                            if (el) el.indeterminate = someSelected;
+                          }}
+                          onChange={toggleAll}
+                          aria-label="Pilih semua"
+                        />
+                      </label>
+                    </th>
                     {columns.map((col) => (
                       <th key={col.key} className="px-4 py-3 font-medium whitespace-nowrap">
                         {col.label}
@@ -303,8 +489,31 @@ export default function DataTable({
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((row) => (
-                    <tr key={row.id} className="border-b border-gray-50 hover:bg-cyan-50/40 transition-colors">
+                  {filtered.map((row) => {
+                    const isSelected = selectedIds.has(row.id);
+                    return (
+                    <tr
+                      key={row.id}
+                      className={`border-b border-gray-50 transition-colors ${
+                        isSelected
+                          ? 'bg-cyan-50/60'
+                          : 'hover:bg-cyan-50/40'
+                      }`}
+                    >
+                      <td className="pl-4 pr-1 py-3 w-10">
+                        <label
+                          className="flex items-center justify-center cursor-pointer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-0 cursor-pointer"
+                            checked={isSelected}
+                            onChange={() => toggleOne(row.id)}
+                            aria-label={`Pilih baris ${row.id}`}
+                          />
+                        </label>
+                      </td>
                       {columns.map((col) => (
                         <td key={col.key} className="px-4 py-3 text-sm text-gray-700 max-w-[200px] truncate">
                           {renderCell(col, row)}
@@ -374,7 +583,8 @@ export default function DataTable({
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -382,13 +592,31 @@ export default function DataTable({
 
           {/* Mobile cards */}
           <div className="lg:hidden space-y-3">
-            {filtered.map((row) => (
+            {filtered.map((row) => {
+              const isSelected = selectedIds.has(row.id);
+              return (
               <div
                 key={row.id}
-                className="bg-white/80 backdrop-blur-sm rounded-2xl border border-white/50 p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all"
+                className={`backdrop-blur-sm rounded-2xl border p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all ${
+                  isSelected
+                    ? 'bg-cyan-50/80 border-cyan-200'
+                    : 'bg-white/80 border-white/50'
+                }`}
               >
-                <div className="flex justify-between items-start mb-2">
-                  <div className="space-y-1 min-w-0 pr-2">
+                <div className="flex justify-between items-start mb-2 gap-2">
+                  <label
+                    className="flex items-center justify-center shrink-0 mt-0.5 cursor-pointer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 rounded border-gray-300 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-0 cursor-pointer"
+                      checked={isSelected}
+                      onChange={() => toggleOne(row.id)}
+                      aria-label={`Pilih baris ${row.id}`}
+                    />
+                  </label>
+                  <div className="space-y-1 min-w-0 pr-2 flex-1">
                     {columns.slice(0, 2).map((col) => (
                       <p key={col.key} className="text-sm">
                         <span className="text-gray-500">{col.label}: </span>
@@ -459,7 +687,8 @@ export default function DataTable({
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -523,6 +752,38 @@ export default function DataTable({
               className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white text-sm font-medium transition-all"
             >
               Ya, Hapus
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={bulkDeleteOpen}
+        onClose={() => !bulkBusy && setBulkDeleteOpen(false)}
+        title={`Hapus ${bulkDeletableCount} Data?`}
+        maxWidth="max-w-sm"
+      >
+        <div className="text-center -mt-2">
+          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="w-6 h-6 text-red-500" />
+          </div>
+          <p className="text-sm text-gray-500 mb-6">
+            {bulkDeletableCount} data akan dihapus permanen. Aksi ini tidak dapat dikembalikan.
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setBulkDeleteOpen(false)}
+              disabled={bulkBusy}
+              className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 text-gray-700 hover:bg-gray-50 active:scale-95 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Batal
+            </button>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkBusy}
+              className="flex-1 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {bulkBusy ? 'Menghapus...' : `Ya, Hapus ${bulkDeletableCount}`}
             </button>
           </div>
         </div>

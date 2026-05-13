@@ -22,8 +22,11 @@ import {
   DatabaseBackup,
   UserCog,
   History,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { useAuth } from '../lib/useAuth';
+import { useTheme } from '../lib/useTheme';
 import MigrationModal from './MigrationModal';
 import { getLocalDataStatus } from '../lib/migrateLocalStorage';
 
@@ -116,6 +119,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const toggleSubGroup = (label: string) => setOpenSubGroups((prev) => ({ ...prev, [label]: !prev[label] }));
   const location = useLocation();
   const { user, signOut, isAdmin } = useAuth();
+  const { resolved: themeResolved, toggle: toggleTheme } = useTheme();
   const handleSignOut = () => {
     void signOut();
   };
@@ -158,18 +162,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-transparent">
       {/* Mobile header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-30 bg-white dark:bg-slate-900/95 dark:backdrop-blur border-b border-gray-200 dark:border-slate-800 px-4 py-3 flex items-center justify-between shadow-sm">
         <button
           onClick={() => setSidebarOpen(true)}
-          className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+          className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
         >
-          <Menu className="w-5 h-5 text-gray-600" />
+          <Menu className="w-5 h-5 text-gray-600 dark:text-slate-300" />
         </button>
         <div className="flex items-center gap-2">
-          <BookOpen className="w-5 h-5 text-primary-600" />
-          <span className="font-bold text-gray-800">Si-CAMBAH</span>
+          <BookOpen className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+          <span className="font-bold text-gray-800 dark:text-slate-100">Si-CAMBAH</span>
         </div>
         <div className="w-9" />
       </div>
@@ -322,6 +326,29 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Toggle + User */}
         <div className="border-t border-teal-800">
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            className={`w-full flex items-center ${
+              collapsed ? 'justify-center px-3 py-2.5' : 'gap-2 px-3 py-2.5'
+            } text-slate-400 hover:text-white hover:bg-teal-800/30 transition-colors text-xs font-medium`}
+            title={
+              themeResolved === 'dark'
+                ? 'Beralih ke mode terang'
+                : 'Beralih ke mode gelap'
+            }
+            aria-label="Ubah tema"
+          >
+            {themeResolved === 'dark' ? (
+              <Sun className="w-4 h-4 shrink-0" />
+            ) : (
+              <Moon className="w-4 h-4 shrink-0" />
+            )}
+            {!collapsed && (
+              <span>{themeResolved === 'dark' ? 'Mode terang' : 'Mode gelap'}</span>
+            )}
+          </button>
+
           {/* Collapse/Expand button - desktop only */}
           <button
             onClick={() => setCollapsed(!collapsed)}
