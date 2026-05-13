@@ -6,6 +6,9 @@ import { useAuth } from './lib/useAuth';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
+import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
+import Tentang from './pages/Tentang';
 import Dashboard from './pages/Dashboard';
 import BansosMasyarakat from './pages/BansosMasyarakat';
 import DanaDesa from './pages/DanaDesa';
@@ -44,6 +47,12 @@ function AppRoutes() {
   if (location.pathname === '/reset-password') {
     return <ResetPassword />;
   }
+
+  // Public information pages — bypass auth gate so they're reachable for
+  // anyone (operators in OAuth consent screen flow, public reviewers, etc.)
+  if (location.pathname === '/privacy') return <Privacy />;
+  if (location.pathname === '/terms') return <Terms />;
+  if (location.pathname === '/tentang') return <Tentang />;
 
   if (!user) {
     return (
