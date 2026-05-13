@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Database backups (created by scripts/backup-db.sh)
+backups/
+
 # Environment variables (contain secrets)
 .env
 .env.local
