@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { BookOpen, LogIn, Eye, EyeOff, Mail, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../lib/useAuth';
@@ -228,9 +229,22 @@ export default function Login() {
           </form>
         )}
 
-        <p className="text-center text-xs text-cyan-100/60 mt-6">
-          © {new Date().getFullYear()} Si-CAMBAH
-        </p>
+        <div className="text-center text-xs text-cyan-100/60 mt-6 space-y-2">
+          <p>© {new Date().getFullYear()} Si-CAMBAH</p>
+          <nav className="flex items-center justify-center gap-3 text-cyan-100/70">
+            <Link to="/tentang" className="hover:text-white transition-colors">
+              Tentang
+            </Link>
+            <span className="text-cyan-100/30">·</span>
+            <Link to="/privacy" className="hover:text-white transition-colors">
+              Kebijakan Privasi
+            </Link>
+            <span className="text-cyan-100/30">·</span>
+            <Link to="/terms" className="hover:text-white transition-colors">
+              Syarat Penggunaan
+            </Link>
+          </nav>
+        </div>
       </div>
     </div>
   );
